@@ -14,8 +14,18 @@ from .exceptions import ElliptecError, ElliptecStatusError, ElliptecTimeoutError
 def create_device(bus: ElliptecBus, address: str, timeout: Optional[float] = None) -> ElliptecDevice:
     """Query the device at ``address`` and instantiate the matching model class.
 
-    Raises :class:`ElliptecError` if the device doesn't answer or reports an
-    unrecognized ELL type.
+    Args:
+        bus: The bus the device is on.
+        address: Single hex-digit address to query.
+        timeout: Reply timeout, in seconds. Defaults to the bus's own
+            ``timeout``.
+
+    Returns:
+        A device instance of the appropriate ``ELLxx`` class.
+
+    Raises:
+        ElliptecError: If the device doesn't answer or reports an
+            unrecognized ELL type.
     """
     reply = bus.request(address, "in", expect="IN", timeout=timeout)
     info = DeviceInfo.from_reply(reply)
@@ -42,7 +52,18 @@ def discover_devices(
     addresses: str = protocol.ADDRESS_CHARS,
     timeout: float = 0.3,
 ) -> dict[str, ElliptecDevice]:
-    """Scan ``addresses`` (default: all 16) and return ``{address: device}`` for each that answers."""
+    """Scan ``addresses`` and return a device instance for each one that answers.
+
+    Args:
+        bus: The bus to scan.
+        addresses: Iterable of single-hex-digit addresses to probe.
+            Defaults to all 16 (``"0"``-``"F"``).
+        timeout: Per-address reply timeout, in seconds.
+
+    Returns:
+        ``{address: device}`` for every address that answered with a
+        recognized ELL type.
+    """
     devices: dict[str, ElliptecDevice] = {}
     for addr in addresses:
         try:
@@ -93,9 +114,35 @@ def setup_devices(
        non-volatile -- this is a one-time step per device, not a per-session
        one).
 
-    Returns the newly assigned addresses, in order. If two devices are
-    *already* colliding at "0" when you call this, disconnect down to one of
-    them first -- this function has no way to un-collide them for you.
+    If two devices are *already* colliding at "0" when you call this,
+    disconnect down to one of them first -- this function has no way to
+    un-collide them for you.
+
+    Args:
+        bus: The bus the new devices are (or will be) connected to.
+        count: How many new devices to address.
+        start_address: First address to try assigning, in ascending order
+            (skipping any already occupied). Single hex digit, ``"1"`` by
+            default (since ``"0"`` is the factory default every new device
+            arrives at).
+        wait_for_next_device: Called as ``wait_for_next_device(index,
+            count)`` before detecting each device; defaults to printing an
+            instruction and blocking on ``input()``. Pass your own callback
+            to drive this step from a GUI instead.
+        detect_timeout: How long to wait, in seconds, for a device to
+            appear at address "0" before giving up on that slot.
+        poll_interval: Polling interval, in seconds, while waiting for a
+            device to appear, and the reply timeout used for the
+            confirm/save steps.
+
+    Returns:
+        The newly assigned addresses, in order.
+
+    Raises:
+        ValueError: If ``start_address`` isn't a valid single hex digit.
+        ElliptecError: If no device appears at address "0" within
+            ``detect_timeout`` for some slot, or if there are no free
+            addresses left to assign.
     """
     if not protocol.is_valid_address(start_address):
         raise ValueError(f"invalid start_address {start_address!r}")

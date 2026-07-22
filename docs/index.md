@@ -12,6 +12,13 @@ ELL18, ELL20, ELL21, ELL22.
 
 Source and issue tracker: <https://github.com/TapyrLabs/tl_elliptec>
 
+```{note}
+This is an unofficial, community-maintained library. It is not affiliated
+with, endorsed by, or sponsored by Thorlabs, Inc. "Thorlabs" and "Elliptec"
+are trademarks of Thorlabs, Inc., used here only to identify the hardware
+this library talks to.
+```
+
 ## Install
 
 ```bash
@@ -54,8 +61,8 @@ position polling, and the full command reference.
 
 guide/installation
 guide/quickstart
-guide/units
 guide/multi_device_setup
+guide/units
 guide/polling
 guide/stop
 ```

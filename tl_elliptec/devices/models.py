@@ -1,23 +1,24 @@
 """Concrete classes for every ELLx module covered by the protocol manual.
 
 Capability composition follows the per-command "applicability" notes in
-etn032283-d03.pdf (not the summary index tables at the end of the manual,
-which are inconsistent with the per-command notes and with each other).
+the manufacturer manual (not the summary index tables at the end of the
+manual, which are inconsistent with the per-command notes and with each
+other)::
 
-Model     Travel type          Motors  Motion cmds  Optimize/Clean  Extras
-ELL6      31mm slider (index)  1                                   -
-ELL6B     31mm slider (index)  2                                   -
-ELL9      31mm slider (index)  2                                   -
-ELL12     19mm slider (index)  2                                   -
-ELL14     360 deg rotary       2       yes          both            -
-ELL15     iris                 2       yes          optimize only   auto-homing
-ELL16     360 deg rotary       2       yes          both            no f/b tuning, no buttons
-ELL17     28mm linear          2       yes          both            -
-ELL18     360 deg rotary       2       yes          both            -
-ELL20     60mm linear          2       yes          both            -
-ELL21     360 deg rotary       2       yes          both            no f/b tuning, no buttons
-ELL22     360 deg filter rot.  2       yes          both            no f/b tuning, no buttons,
-                                                                     zero-position, factory reset
+    Model     Travel type          Motors  Motion cmds  Optimize/Clean  Extras
+    ELL6      31mm slider (index)  1                                   -
+    ELL6B     31mm slider (index)  2                                   -
+    ELL9      31mm slider (index)  2                                   -
+    ELL12     19mm slider (index)  2                                   -
+    ELL14     360 deg rotary       2       yes          both            -
+    ELL15     iris                 2       yes          optimize only   auto-homing
+    ELL16     360 deg rotary       2       yes          both            no f/b tuning, no buttons
+    ELL17     28mm linear          2       yes          both            -
+    ELL18     360 deg rotary       2       yes          both            -
+    ELL20     60mm linear          2       yes          both            -
+    ELL21     360 deg rotary       2       yes          both            no f/b tuning, no buttons
+    ELL22     360 deg filter rot.  2       yes          both            no f/b tuning, no buttons,
+                                                                         zero-position, factory reset
 """
 from __future__ import annotations
 

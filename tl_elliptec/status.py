@@ -5,6 +5,11 @@ from enum import IntEnum
 
 
 class StatusCode(IntEnum):
+    """Status/error code carried in a GS or BS reply's data byte.
+
+    See :func:`describe` for the human-readable meaning of each value.
+    """
+
     OK = 0
     COMMUNICATION_TIMEOUT = 1
     MECHANICAL_TIMEOUT = 2
@@ -44,6 +49,16 @@ STATUS_MESSAGES = {
 
 
 def describe(code: int) -> str:
+    """Get the human-readable meaning of a GS/BS status/error code.
+
+    Args:
+        code: The numeric status code, e.g. from
+            :meth:`~tl_elliptec.bus.Reply.as_status_code`.
+
+    Returns:
+        A short description, e.g. ``"Busy"`` for ``9``, or ``"Reserved"``
+        for any value in 14-255.
+    """
     if 14 <= code <= 255:
         return "Reserved"
     return STATUS_MESSAGES.get(code, f"Unknown status code {code}")

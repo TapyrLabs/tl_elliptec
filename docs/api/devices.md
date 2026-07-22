@@ -34,14 +34,16 @@ instead of sending a doomed command to the device.
 
 ## Base class and capability mixins
 
-```{automodule} tl_elliptec.devices.base
-:members:
-:undoc-members:
+```{eval-rst}
+.. automodule:: tl_elliptec.devices.base
+   :members:
+   :undoc-members:
 ```
 
 ## Concrete models
 
-```{automodule} tl_elliptec.devices.models
-:members:
-:undoc-members:
+```{eval-rst}
+.. automodule:: tl_elliptec.devices.models
+   :members:
+   :undoc-members:
 ```

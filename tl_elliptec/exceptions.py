@@ -17,9 +17,20 @@ class ElliptecProtocolError(ElliptecError):
 
 
 class ElliptecStatusError(ElliptecError):
-    """The device replied with a GS/BS status frame indicating an error."""
+    """The device replied with a GS/BS status frame indicating an error.
+
+    Attributes:
+        address: The address of the device that reported the error.
+        code: The raw numeric status code (see :class:`~tl_elliptec.status.StatusCode`).
+        status: ``code`` as a :class:`~tl_elliptec.status.StatusCode`, or
+            ``None`` if it's outside the known/reserved range.
+    """
 
     def __init__(self, address: str, code: int):
+        """Args:
+            address: The address of the device that reported the error.
+            code: The raw numeric status code from the GS/BS reply.
+        """
         self.address = address
         self.code = code
         try:

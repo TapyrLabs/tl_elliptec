@@ -1,7 +1,8 @@
 """Python library for Thorlabs Elliptec (ELLx) resonant piezo motor modules.
 
-Talks the ASCII-hex protocol described in "ELLx OEM/Bare modules protocol
-manual" (etn032283-d03.pdf) over a multidrop TTL RS-232 / USB bus (a "hub").
+Talks the ASCII-hex protocol described in the manufacturer's "ELLx
+OEM/Bare modules protocol manual" over a multidrop TTL RS-232 / USB bus
+(a "hub").
 
 Quick start::
 

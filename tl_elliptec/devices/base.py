@@ -24,18 +24,44 @@ from ..status import StatusCode
 
 @dataclass
 class DeviceInfo:
+    """Parsed reply to HOSTREQ_INFORMATION "in" / DEVGET_INFORMATION "IN"."""
+
+    #: Address the device reported from.
     address: str
-    ell_type: int           # decimal model number, e.g. 14 for an ELL14 (see note below)
+    #: Decimal model number, e.g. ``14`` for an ELL14 (decoded from the
+    #: wire's hex-ASCII field -- see :meth:`from_reply`).
+    ell_type: int
+    #: Device serial number, as an 8-character hex-ASCII string.
     serial_number: str
+    #: Year of manufacture, as a 4-character string.
     year: str
+    #: Firmware release, as a 2-character string.
     firmware_release: str
+    #: Hardware release number (7 bits, the thread-type bit already split
+    #: out into :attr:`is_imperial`).
     hardware_release: int
+    #: ``True`` if the stage uses an imperial-thread lead screw, ``False``
+    #: if metric.
     is_imperial: bool
-    travel: int             # mm or degrees, per the model table
+    #: Full travel of the stage, in mm or degrees per the model table (not
+    #: corrected for any per-model quirks).
+    travel: int
+    #: Raw "PULSES/M.U." field as reported by the device. On rotary stages
+    #: this is empirically pulses-per-revolution, not pulses-per-degree --
+    #: see ``ElliptecDevice.PULSES_FIELD_IS_PER_REVOLUTION`` for the
+    #: correction applied when computing ``ElliptecDevice.pulses_per_unit``.
     pulses_per_unit: int
 
     @classmethod
     def from_reply(cls, reply: Reply) -> "DeviceInfo":
+        """Parse an "IN" reply into a :class:`DeviceInfo`.
+
+        Args:
+            reply: The device's reply to a HOSTREQ_INFORMATION "in" request.
+
+        Returns:
+            The parsed device information.
+        """
         # Data layout (hex-ASCII chars): ELL(2) SN(8) YEAR(4) FW(2) HW(2) TRAVEL(4) PULSES(8)
         #
         # Every multi-hex-digit field here is hex-ASCII per the protocol's
@@ -71,26 +97,44 @@ class DeviceInfo:
 
 @dataclass
 class MotorInfo:
+    """Parsed reply to HOSTREQ_MOTORxINFO "i1"/"i2"."""
+
+    #: Whether the motor's control loop is active.
     loop_on: bool
+    #: Whether the motor is currently energized.
     motor_on: bool
+    #: Last measured motor current, in amps.
     current_amps: float
+    #: Raw forward resonant "period" value (see :func:`period_for_frequency`
+    #: to convert to/from Hz).
     forward_period: int
+    #: Raw backward resonant "period" value.
     backward_period: int
 
     @property
     def forward_frequency_hz(self) -> Optional[float]:
+        """Forward resonant frequency in Hz, or ``None`` if undefined (period is 0 or 0xFFFF)."""
         if self.forward_period in (0, 0xFFFF):
             return None
         return 14740000 / self.forward_period
 
     @property
     def backward_frequency_hz(self) -> Optional[float]:
+        """Backward resonant frequency in Hz, or ``None`` if undefined (period is 0 or 0xFFFF)."""
         if self.backward_period in (0, 0xFFFF):
             return None
         return 14740000 / self.backward_period
 
     @classmethod
     def from_reply(cls, reply: Reply) -> "MotorInfo":
+        """Parse an "I1"/"I2" reply into a :class:`MotorInfo`.
+
+        Args:
+            reply: The device's reply to a HOSTREQ_MOTORxINFO "i1"/"i2" request.
+
+        Returns:
+            The parsed motor information.
+        """
         # Per the worked example in the manual ("0I1100428FFFFFFFF00BD008B" ->
         # Loop=1, Motor=0, Current=0428, rampUp=FFFF, rampDown=FFFF, FwP=00BD,
         # BwP=008B), Loop/Motor are single hex *nibbles*, not the usual 2-digit
@@ -112,16 +156,30 @@ class MotorInfo:
 
 @dataclass
 class CurrentCurveSample:
+    """One (frequency, current) sample from :meth:`ElliptecDevice.scan_current_curve`."""
+
+    #: Raw resonant "period" value at this sample (see :attr:`frequency_hz`
+    #: to convert to Hz).
     period: int
+    #: Measured motor current at this frequency, in amps.
     current_amps: float
 
     @property
     def frequency_hz(self) -> float:
+        """This sample's frequency, in Hz (``inf`` if ``period`` is 0)."""
         return 14740000 / self.period if self.period else float("inf")
 
 
 def period_for_frequency(frequency_hz: float) -> int:
-    """Convert a target resonant frequency (Hz) to the protocol's "period" units."""
+    """Convert a target resonant frequency to the protocol's "period" units.
+
+    Args:
+        frequency_hz: Target frequency, in Hz.
+
+    Returns:
+        The equivalent raw "period" value, as used by
+        :meth:`ElliptecDevice.set_forward_period`/``set_backward_period``.
+    """
     return round(14740000 / frequency_hz)
 
 
@@ -188,6 +246,25 @@ class ElliptecDevice:
         timeout: Optional[float] = None,
         **bus_kwargs,
     ):
+        """Args:
+            port_or_bus: A serial port name/path (e.g. ``"COM5"``) to open
+                and own a new :class:`~tl_elliptec.bus.ElliptecBus` for this
+                device alone, or an existing ``ElliptecBus`` to share with
+                other devices on the same multidrop bus.
+            address: Single hex-digit device address, ``"0"`` (factory
+                default) unless already reassigned.
+            timeout: Default per-request reply timeout, in seconds, used
+                for this device's calls unless overridden per call.
+            **bus_kwargs: Extra keyword arguments forwarded to
+                :class:`~tl_elliptec.bus.ElliptecBus` when ``port_or_bus``
+                is a port string. Invalid (raises :class:`TypeError`) when
+                ``port_or_bus`` is an existing bus instance.
+
+        Raises:
+            ValueError: If ``address`` isn't a valid single hex digit.
+            TypeError: If ``bus_kwargs`` are given along with an existing
+                bus instance (they only apply when opening a new port).
+        """
         if not protocol.is_valid_address(address):
             raise ValueError(f"invalid address {address!r}")
         if isinstance(port_or_bus, str):
@@ -266,7 +343,15 @@ class ElliptecDevice:
     # -- physical-unit <-> encoder-pulse conversion ----------------------
 
     def refresh_calibration(self) -> DeviceInfo:
-        """Query the device and cache its pulses-per-unit and full-range pulse counts."""
+        """Query the device and cache its pulses-per-unit and full-range pulse counts.
+
+        Returns:
+            The freshly queried device information (also cached as
+            :attr:`info`).
+
+        Raises:
+            ElliptecTimeoutError: If the device doesn't answer.
+        """
         info = self.get_info()
         self._info = info
         self._raw_pulses_per_unit = info.pulses_per_unit
@@ -292,6 +377,9 @@ class ElliptecDevice:
         full travel instead of physical units. Unlike ``pulses_per_unit``,
         there's no static per-model fallback for this -- call
         ``refresh_calibration()`` once the device is reachable.
+
+        Raises:
+            ElliptecError: If calibration has never succeeded for this device.
         """
         if self._raw_pulses_per_unit is None:
             raise ElliptecError(
@@ -315,12 +403,20 @@ class ElliptecDevice:
     # -- identification & status ----------------------------------------
 
     def get_info(self) -> DeviceInfo:
-        """HOSTREQ_INFORMATION "in" / DEVGET_INFORMATION "IN"."""
+        """HOSTREQ_INFORMATION "in" / DEVGET_INFORMATION "IN".
+
+        Returns:
+            The device's identification info.
+        """
         reply = self._request("in", expect="IN")
         return DeviceInfo.from_reply(reply)
 
     def get_status(self) -> StatusCode:
-        """HOSTREQ_STATUS "gs" / DEVGET_STATUS "GS". Reading the status clears it."""
+        """HOSTREQ_STATUS "gs" / DEVGET_STATUS "GS". Reading the status clears it.
+
+        Returns:
+            The device's current status/error code.
+        """
         reply = self._request("gs", expect="GS", raise_on_error=False)
         return StatusCode(reply.as_status_code())
 
@@ -329,7 +425,14 @@ class ElliptecDevice:
         self._request("us")
 
     def change_address(self, new_address: str) -> None:
-        """HOSTREQ_CHANGEADDRESS "ca". Device replies from the *new* address."""
+        """HOSTREQ_CHANGEADDRESS "ca". Device replies from the *new* address.
+
+        Args:
+            new_address: The new single hex-digit address to assign.
+
+        Raises:
+            ValueError: If ``new_address`` isn't a valid single hex digit.
+        """
         if not protocol.is_valid_address(new_address):
             raise ValueError(f"invalid address {new_address!r}")
         new_address = new_address.upper()
@@ -337,11 +440,23 @@ class ElliptecDevice:
         self.address = new_address
 
     def isolate_minutes(self, minutes: int) -> None:
-        """HOST_ISOLATEMINUTES "is". Device will not reply for this many minutes."""
+        """HOST_ISOLATEMINUTES "is". Device will not reply for this many minutes.
+
+        Args:
+            minutes: How long to isolate the device for.
+        """
         self._request("is", protocol.encode_char(minutes))
 
     def group_address(self, temporary_address: str) -> None:
-        """HOST_GROUPADDRESS "ga". Device listens on ``temporary_address`` until its next move."""
+        """HOST_GROUPADDRESS "ga". Device listens on ``temporary_address`` until its next move.
+
+        Args:
+            temporary_address: Single hex-digit address to listen on
+                temporarily, for synchronizing moves across several devices.
+
+        Raises:
+            ValueError: If ``temporary_address`` isn't a valid single hex digit.
+        """
         if not protocol.is_valid_address(temporary_address):
             raise ValueError(f"invalid address {temporary_address!r}")
         self._request("ga", temporary_address.upper())
@@ -353,33 +468,104 @@ class ElliptecDevice:
     # -- per-motor info / tuning ------------------------------------------
 
     def get_motor_info(self, motor: int) -> MotorInfo:
-        """HOSTREQ_MOTORxINFO "i1"/"i2"."""
+        """HOSTREQ_MOTORxINFO "i1"/"i2".
+
+        Args:
+            motor: Which motor to query, ``1`` or ``2``.
+
+        Returns:
+            The motor's current state and tuning.
+
+        Raises:
+            ValueError: If ``motor`` isn't ``1`` or ``2``.
+            ElliptecUnsupportedError: If ``motor`` is ``2`` and this device
+                only has one motor.
+        """
         self._check_motor(motor)
         reply = self._request(f"i{motor}", expect=f"I{motor}")
         return MotorInfo.from_reply(reply)
 
     def set_forward_period(self, motor: int, period: Optional[int]) -> None:
-        """HOSTSET_FWP_MOTORx "f1"/"f2". Pass ``None`` to restore the factory default."""
+        """HOSTSET_FWP_MOTORx "f1"/"f2". Pass ``None`` to restore the factory default.
+
+        Args:
+            motor: Which motor to tune, ``1`` or ``2``.
+            period: The raw forward "period" value to set (see
+                :func:`period_for_frequency`), or ``None`` to restore the
+                factory default.
+
+        Raises:
+            ValueError: If ``motor`` isn't ``1`` or ``2``.
+            ElliptecUnsupportedError: If this device doesn't support
+                forward/backward period tuning, or lacks the requested motor.
+        """
         self._check_motor(motor)
         self._require(self.supports_motor_tuning, "forward/backward period tuning")
         data = RESTORE_FACTORY_PERIOD if period is None else _encode_tuned_period(period)
         self._request(f"f{motor}", data)
 
     def set_forward_frequency(self, motor: int, frequency_hz: float) -> None:
+        """Set a motor's forward resonant frequency directly, in Hz.
+
+        Args:
+            motor: Which motor to tune, ``1`` or ``2``.
+            frequency_hz: Target forward resonant frequency, in Hz.
+
+        Raises:
+            ValueError: If ``motor`` isn't ``1`` or ``2``.
+            ElliptecUnsupportedError: If this device doesn't support
+                forward/backward period tuning, or lacks the requested motor.
+        """
         self.set_forward_period(motor, period_for_frequency(frequency_hz))
 
     def set_backward_period(self, motor: int, period: Optional[int]) -> None:
-        """HOSTSET_BWP_MOTORx "b1"/"b2". Pass ``None`` to restore the factory default."""
+        """HOSTSET_BWP_MOTORx "b1"/"b2". Pass ``None`` to restore the factory default.
+
+        Args:
+            motor: Which motor to tune, ``1`` or ``2``.
+            period: The raw backward "period" value to set (see
+                :func:`period_for_frequency`), or ``None`` to restore the
+                factory default.
+
+        Raises:
+            ValueError: If ``motor`` isn't ``1`` or ``2``.
+            ElliptecUnsupportedError: If this device doesn't support
+                forward/backward period tuning, or lacks the requested motor.
+        """
         self._check_motor(motor)
         self._require(self.supports_motor_tuning, "forward/backward period tuning")
         data = RESTORE_FACTORY_PERIOD if period is None else _encode_tuned_period(period)
         self._request(f"b{motor}", data)
 
     def set_backward_frequency(self, motor: int, frequency_hz: float) -> None:
+        """Set a motor's backward resonant frequency directly, in Hz.
+
+        Args:
+            motor: Which motor to tune, ``1`` or ``2``.
+            frequency_hz: Target backward resonant frequency, in Hz.
+
+        Raises:
+            ValueError: If ``motor`` isn't ``1`` or ``2``.
+            ElliptecUnsupportedError: If this device doesn't support
+                forward/backward period tuning, or lacks the requested motor.
+        """
         self.set_backward_period(motor, period_for_frequency(frequency_hz))
 
     def search_frequency(self, motor: int, timeout: float = 30.0) -> StatusCode:
-        """HOSTREQ_SEARCHFREQ_MOTORx "s1"/"s2". The moving part may move. Remember to `save_user_data()`."""
+        """HOSTREQ_SEARCHFREQ_MOTORx "s1"/"s2". The moving part may move. Remember to `save_user_data()`.
+
+        Args:
+            motor: Which motor to search, ``1`` or ``2``.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting status code.
+
+        Raises:
+            ValueError: If ``motor`` isn't ``1`` or ``2``.
+            ElliptecUnsupportedError: If ``motor`` is ``2`` and this device
+                only has one motor.
+        """
         self._check_motor(motor)
         reply = self.bus.request(self.address, f"s{motor}", expect="GS", timeout=timeout)
         return StatusCode(reply.as_status_code())
@@ -387,8 +573,19 @@ class ElliptecDevice:
     def scan_current_curve(self, motor: int, timeout: float = 15.0) -> list[CurrentCurveSample]:
         """HOSTREQ_SCANCURRENTCURVE_MOTORx "c1"/"c2" + DEVGET_CURRENTCURVEMEASURE "C1"/"C2".
 
-        Takes up to ~12 seconds on the device. Returns 87 (period, current) samples
-        spanning ~70-120 kHz.
+        Takes up to ~12 seconds on the device.
+
+        Args:
+            motor: Which motor to scan, ``1`` or ``2``.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            Up to 87 (period, current) samples spanning ~70-120 kHz.
+
+        Raises:
+            ValueError: If ``motor`` isn't ``1`` or ``2``.
+            ElliptecUnsupportedError: If ``motor`` is ``2`` and this device
+                only has one motor.
         """
         self._check_motor(motor)
         reply = self.bus.request(
@@ -422,38 +619,91 @@ class ElliptecDevice:
     def get_position_pulses(self, priority: int = RequestPriority.COMMAND) -> int:
         """HOST_GETPOSITION "gp" / DEV_GETPOSITION "PO". Raw encoder pulses, signed.
 
-        ``priority`` is forwarded to the bus's request broker (see
-        :class:`~tl_elliptec.bus.RequestPriority`); leave it at the default
-        unless this call is opportunistic background polling that shouldn't
-        delay other, explicitly issued commands (see ``poll_position``).
+        Args:
+            priority: Forwarded to the bus's request broker (see
+                :class:`~tl_elliptec.bus.RequestPriority`); leave it at the
+                default unless this call is opportunistic background
+                polling that shouldn't delay other, explicitly issued
+                commands (see ``poll_position``).
+
+        Returns:
+            The current position, in raw encoder pulses.
         """
         reply = self._request("gp", expect="PO", priority=priority)
         return protocol.decode_long(reply.data)
 
     def get_position(self, priority: int = RequestPriority.COMMAND) -> float:
-        """Current position in mm or degrees (see ``pulses_per_unit``)."""
+        """Current position in mm or degrees (see ``pulses_per_unit``).
+
+        Args:
+            priority: Forwarded to the bus's request broker; see
+                :meth:`get_position_pulses`.
+
+        Returns:
+            The current position, in mm or degrees.
+        """
         return self._to_unit(self.get_position_pulses(priority=priority))
 
     def get_position_range(self, priority: int = RequestPriority.COMMAND) -> float:
-        """Current position as a 0..1 fraction of the device's full travel."""
+        """Current position as a 0..1 fraction of the device's full travel.
+
+        Args:
+            priority: Forwarded to the bus's request broker; see
+                :meth:`get_position_pulses`.
+
+        Returns:
+            The current position, as a 0..1 fraction of full travel.
+        """
         return self._to_range(self.get_position_pulses(priority=priority))
 
     def forward_pulses(self, timeout: float = 30.0) -> Optional[int]:
-        """HOST_FORWARD "fw". Moves by the configured jog step (or continuously, see ``MotionMixin``)."""
+        """HOST_FORWARD "fw". Moves by the configured jog step (or continuously, see ``MotionMixin``).
+
+        Args:
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in raw encoder pulses, or ``None`` if
+            the reply carried no position (e.g. continuous-motion units).
+        """
         reply = self.bus.request(self.address, "fw", timeout=timeout)
         return self._position_from_move_reply(reply)
 
     def forward(self, timeout: float = 30.0) -> Optional[float]:
-        """Jog forward by the configured step size. Returns the resulting position in units."""
+        """Jog forward by the configured step size.
+
+        Args:
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in mm or degrees, or ``None`` if the
+            reply carried no position.
+        """
         return self._to_unit(self.forward_pulses(timeout=timeout))
 
     def backward_pulses(self, timeout: float = 30.0) -> Optional[int]:
-        """HOST_BACKWARD "bw"."""
+        """HOST_BACKWARD "bw".
+
+        Args:
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in raw encoder pulses, or ``None`` if
+            the reply carried no position.
+        """
         reply = self.bus.request(self.address, "bw", timeout=timeout)
         return self._position_from_move_reply(reply)
 
     def backward(self, timeout: float = 30.0) -> Optional[float]:
-        """Jog backward by the configured step size. Returns the resulting position in units."""
+        """Jog backward by the configured step size.
+
+        Args:
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in mm or degrees, or ``None`` if the
+            reply carried no position.
+        """
         return self._to_unit(self.backward_pulses(timeout=timeout))
 
     @staticmethod
@@ -466,9 +716,16 @@ class ElliptecDevice:
     def get_button_status(self) -> Optional[Reply]:
         """Poll once, without blocking indefinitely, for a spontaneous BS/BO message.
 
-        Returns ``None`` if nothing has arrived within a short timeout. These
-        messages are pushed by the device when its physical FWD/BWD/JOG
+        These messages are pushed by the device when its physical FWD/BWD/JOG
         buttons are used; they are not solicited by a host command.
+
+        Returns:
+            The spontaneous reply, or ``None`` if nothing arrived within a
+            short timeout.
+
+        Raises:
+            ElliptecUnsupportedError: If this device doesn't support
+                button status messages.
         """
         self._require(self.supports_button_messages, "hardware button status messages")
         try:
@@ -544,6 +801,16 @@ class ElliptecDevice:
         Without ``stop_event``, stop iteration the normal way (``break`` out
         of a ``for`` loop consuming it, or call ``.close()`` on the
         generator from the same thread that's driving it).
+
+        Args:
+            interval: Delay between polling ticks, in seconds.
+            tolerance: Minimum change (in mm/degrees) required to yield
+                again; ``0`` yields on any change.
+            stop_event: Optional event to stop the loop from another thread.
+
+        Yields:
+            The position, in mm or degrees, each time it changes by more
+            than ``tolerance``.
         """
         yield from self._poll(
             lambda: self.get_position(priority=RequestPriority.POLL), interval, tolerance, stop_event
@@ -555,7 +822,18 @@ class ElliptecDevice:
         tolerance: float = 0.0,
         stop_event: Optional[threading.Event] = None,
     ) -> Iterator[int]:
-        """Like ``poll_position``, but yields raw encoder pulses."""
+        """Like ``poll_position``, but yields raw encoder pulses.
+
+        Args:
+            interval: Delay between polling ticks, in seconds.
+            tolerance: Minimum change (in raw pulses) required to yield
+                again; ``0`` yields on any change.
+            stop_event: Optional event to stop the loop from another thread.
+
+        Yields:
+            The position, in raw encoder pulses, each time it changes by
+            more than ``tolerance``.
+        """
         yield from self._poll(
             lambda: self.get_position_pulses(priority=RequestPriority.POLL), interval, tolerance, stop_event
         )
@@ -566,7 +844,18 @@ class ElliptecDevice:
         tolerance: float = 0.0,
         stop_event: Optional[threading.Event] = None,
     ) -> Iterator[float]:
-        """Like ``poll_position``, but yields a 0..1 fraction of the device's full travel."""
+        """Like ``poll_position``, but yields a 0..1 fraction of the device's full travel.
+
+        Args:
+            interval: Delay between polling ticks, in seconds.
+            tolerance: Minimum change (as a 0..1 fraction) required to
+                yield again; ``0`` yields on any change.
+            stop_event: Optional event to stop the loop from another thread.
+
+        Yields:
+            The position, as a 0..1 fraction of full travel, each time it
+            changes by more than ``tolerance``.
+        """
         yield from self._poll(
             lambda: self.get_position_range(priority=RequestPriority.POLL), interval, tolerance, stop_event
         )
@@ -585,88 +874,223 @@ class MotionMixin:
     """
 
     def home_pulses(self, direction: int = 0, timeout: float = 30.0) -> Optional[int]:
-        """HOSTREQ_HOME "ho". ``direction``: 0 = clockwise, 1 = counter-clockwise (rotary only)."""
+        """HOSTREQ_HOME "ho".
+
+        Args:
+            direction: Homing direction for rotary stages: ``0`` for
+                clockwise, ``1`` for counter-clockwise. Ignored on other
+                stage types.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in raw encoder pulses, or ``None`` if
+            the reply carried no position.
+        """
         reply = self.bus.request(
             self.address, "ho", protocol.encode_char(direction), timeout=timeout
         )
         return self._position_from_move_reply(reply)
 
     def home(self, direction: int = 0, timeout: float = 30.0) -> Optional[float]:
-        """Move to the home position. Returns the resulting position in units."""
+        """Move to the home position.
+
+        Args:
+            direction: Homing direction for rotary stages: ``0`` for
+                clockwise, ``1`` for counter-clockwise. Ignored on other
+                stage types.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in mm or degrees, or ``None`` if the
+            reply carried no position.
+        """
         return self._to_unit(self.home_pulses(direction, timeout=timeout))
 
     def home_range(self, direction: int = 0, timeout: float = 30.0) -> Optional[float]:
-        """Move to the home position. Returns the resulting position as a 0..1 fraction of full travel."""
+        """Move to the home position.
+
+        Args:
+            direction: Homing direction for rotary stages: ``0`` for
+                clockwise, ``1`` for counter-clockwise. Ignored on other
+                stage types.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, as a 0..1 fraction of full travel, or
+            ``None`` if the reply carried no position.
+        """
         return self._to_range(self.home_pulses(direction, timeout=timeout))
 
     def move_absolute_pulses(self, position: int, timeout: float = 30.0) -> Optional[int]:
-        """HOSTREQ_MOVEABSOLUTE "ma". ``position`` in raw encoder pulses."""
+        """HOSTREQ_MOVEABSOLUTE "ma".
+
+        Args:
+            position: Target position, in raw encoder pulses.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in raw encoder pulses, or ``None`` if
+            the reply carried no position.
+        """
         reply = self.bus.request(
             self.address, "ma", protocol.encode_long(position), timeout=timeout
         )
         return self._position_from_move_reply(reply)
 
     def move_absolute(self, position: float, timeout: float = 30.0) -> Optional[float]:
-        """Move to an absolute position in mm or degrees (see ``pulses_per_unit``)."""
+        """Move to an absolute position in mm or degrees (see ``pulses_per_unit``).
+
+        Args:
+            position: Target position, in mm or degrees.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in mm or degrees, or ``None`` if the
+            reply carried no position.
+        """
         return self._to_unit(self.move_absolute_pulses(self._to_pulses(position), timeout=timeout))
 
     def move_absolute_range(self, fraction: float, timeout: float = 30.0) -> Optional[float]:
-        """Move to an absolute position given as a 0..1 fraction of the device's full travel."""
+        """Move to an absolute position given as a 0..1 fraction of the device's full travel.
+
+        Args:
+            fraction: Target position, as a 0..1 fraction of full travel.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, as a 0..1 fraction of full travel, or
+            ``None`` if the reply carried no position.
+        """
         return self._to_range(self.move_absolute_pulses(self._from_range(fraction), timeout=timeout))
 
     def move_relative_pulses(self, delta: int, timeout: float = 30.0) -> Optional[int]:
-        """HOSTREQ_MOVERELATIVE "mr". ``delta`` in raw encoder pulses, signed."""
+        """HOSTREQ_MOVERELATIVE "mr".
+
+        Args:
+            delta: Signed distance to move, in raw encoder pulses.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in raw encoder pulses, or ``None`` if
+            the reply carried no position.
+        """
         reply = self.bus.request(
             self.address, "mr", protocol.encode_long(delta), timeout=timeout
         )
         return self._position_from_move_reply(reply)
 
     def move_relative(self, delta: float, timeout: float = 30.0) -> Optional[float]:
-        """Move by a relative distance in mm or degrees (see ``pulses_per_unit``)."""
+        """Move by a relative distance in mm or degrees (see ``pulses_per_unit``).
+
+        Args:
+            delta: Signed distance to move, in mm or degrees.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in mm or degrees, or ``None`` if the
+            reply carried no position.
+        """
         return self._to_unit(self.move_relative_pulses(self._to_pulses(delta), timeout=timeout))
 
     def move_relative_range(self, fraction: float, timeout: float = 30.0) -> Optional[float]:
-        """Move by a relative distance given as a fraction of the device's full travel."""
+        """Move by a relative distance given as a fraction of the device's full travel.
+
+        Args:
+            fraction: Signed distance to move, as a fraction of full travel.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, as a 0..1 fraction of full travel, or
+            ``None`` if the reply carried no position.
+        """
         return self._to_range(self.move_relative_pulses(self._from_range(fraction), timeout=timeout))
 
     def get_home_offset_pulses(self) -> int:
-        """HOSTREQ_HOMEOFFSET "go" / DEVGET_HOMEOFFSET "HO"."""
+        """HOSTREQ_HOMEOFFSET "go" / DEVGET_HOMEOFFSET "HO".
+
+        Returns:
+            Distance of the home position from the absolute limit of
+            travel, in raw encoder pulses.
+        """
         reply = self._request("go", expect="HO")
         return protocol.decode_long(reply.data)
 
     def get_home_offset(self) -> float:
-        """Distance of the home position from the absolute limit of travel, in units."""
+        """Distance of the home position from the absolute limit of travel, in units.
+
+        Returns:
+            The home offset, in mm or degrees.
+        """
         return self._to_unit(self.get_home_offset_pulses())
 
     def set_home_offset_pulses(self, offset: int) -> None:
-        """HOSTSET_HOMEOFFSET "so"."""
+        """HOSTSET_HOMEOFFSET "so".
+
+        Args:
+            offset: New home offset, in raw encoder pulses.
+        """
         self._request("so", protocol.encode_long(offset))
 
     def set_home_offset(self, offset: float) -> None:
+        """Set the distance of the home position from the absolute limit of travel.
+
+        Args:
+            offset: New home offset, in mm or degrees.
+        """
         self.set_home_offset_pulses(self._to_pulses(offset))
 
     def get_jog_step_size_pulses(self) -> int:
-        """HOSTREQ_JOGSTEPSIZE "gj" / DEVGET_JOGSTEPSIZE "GJ"."""
+        """HOSTREQ_JOGSTEPSIZE "gj" / DEVGET_JOGSTEPSIZE "GJ".
+
+        Returns:
+            The configured jog step size, in raw encoder pulses.
+        """
         reply = self._request("gj", expect="GJ")
         return protocol.decode_long(reply.data)
 
     def get_jog_step_size(self) -> float:
+        """Get the configured jog step size, in mm or degrees.
+
+        Returns:
+            The configured jog step size, in mm or degrees.
+        """
         return self._to_unit(self.get_jog_step_size_pulses())
 
     def set_jog_step_size_pulses(self, step: int) -> None:
-        """HOSTSET_JOGSTEPSIZE "sj". A step of 0 enables continuous motion on ELL14 (use with `stop()`)."""
+        """HOSTSET_JOGSTEPSIZE "sj". A step of 0 enables continuous motion on ELL14 (use with `stop()`).
+
+        Args:
+            step: New jog step size, in raw encoder pulses.
+        """
         self._request("sj", protocol.encode_long(step))
 
     def set_jog_step_size(self, step: float) -> None:
+        """Set the jog step size used by ``forward()``/``backward()``.
+
+        Args:
+            step: New jog step size, in mm or degrees.
+        """
         self.set_jog_step_size_pulses(self._to_pulses(step))
 
     def get_velocity(self) -> int:
-        """HOSTREQ_VELOCITY "gv" / DEVGET_VELOCITY "GV". Percent of max velocity."""
+        """HOSTREQ_VELOCITY "gv" / DEVGET_VELOCITY "GV".
+
+        Returns:
+            The velocity compensation, as a percentage (0-100) of max velocity.
+        """
         reply = self._request("gv", expect="GV")
         return protocol.decode_char(reply.data)
 
     def set_velocity(self, percent: int) -> None:
-        """HOSTSET_VELOCITY "sv". 25-45%+ typical minimum before stalling; 50% minimum on ELL16/ELL21."""
+        """HOSTSET_VELOCITY "sv". 25-45%+ typical minimum before stalling; 50% minimum on ELL16/ELL21.
+
+        Args:
+            percent: Velocity compensation, as a percentage (0-100) of max
+                velocity.
+
+        Raises:
+            ValueError: If ``percent`` is outside 0-100.
+        """
         if not (0 <= percent <= 100):
             raise ValueError("velocity percent must be 0-100")
         self._request("sv", protocol.encode_char(percent))
@@ -696,14 +1120,34 @@ class AutoHomingMixin:
     """ah: ELL15 motorized iris only."""
 
     def set_auto_homing_pulses(self, enabled: bool, timeout: float = 30.0) -> Optional[int]:
-        """HOSTSET_AUTOHOMING "ah". Home-at-startup toggle for the ELL15."""
+        """HOSTSET_AUTOHOMING "ah". Home-at-startup toggle for the ELL15.
+
+        Args:
+            enabled: ``True`` to home automatically at startup, ``False``
+                to disable it.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in raw encoder pulses, or ``None`` if
+            the reply carried no position.
+        """
         reply = self.bus.request(
             self.address, "ah", protocol.encode_char(1 if enabled else 0), timeout=timeout
         )
         return self._position_from_move_reply(reply)
 
     def set_auto_homing(self, enabled: bool, timeout: float = 30.0) -> Optional[float]:
-        """Home-at-startup toggle for the ELL15. Returns the resulting position in units."""
+        """Home-at-startup toggle for the ELL15.
+
+        Args:
+            enabled: ``True`` to home automatically at startup, ``False``
+                to disable it.
+            timeout: Reply timeout, in seconds.
+
+        Returns:
+            The resulting position, in units, or ``None`` if the reply
+            carried no position.
+        """
         return self._to_unit(self.set_auto_homing_pulses(enabled, timeout=timeout))
 
 
@@ -713,12 +1157,32 @@ class OptimizeCleanMixin:
     supports_clean: bool = True
 
     def optimize_motors(self, timeout: float = 300.0) -> StatusCode:
-        """HOST_OPTIMIZE_MOTORS "om". Can take several minutes; occupies the whole bus."""
+        """HOST_OPTIMIZE_MOTORS "om". Can take several minutes; occupies the whole bus.
+
+        Args:
+            timeout: Reply timeout, in seconds (default allows several
+                minutes for the optimization cycle to complete).
+
+        Returns:
+            The resulting status code.
+        """
         reply = self.bus.request(self.address, "om", expect="GS", timeout=timeout)
         return StatusCode(reply.as_status_code())
 
     def clean_mechanics(self, timeout: float = 300.0) -> StatusCode:
-        """HOST_CLEAN_MECHANICS "cm". Can take several minutes; occupies the whole bus."""
+        """HOST_CLEAN_MECHANICS "cm". Can take several minutes; occupies the whole bus.
+
+        Args:
+            timeout: Reply timeout, in seconds (default allows several
+                minutes for the cleaning cycle to complete).
+
+        Returns:
+            The resulting status code.
+
+        Raises:
+            ElliptecUnsupportedError: If this device doesn't support the
+                cleaning cycle (e.g. the ELL15).
+        """
         self._require(self.supports_clean, "the mechanical cleaning cycle")
         reply = self.bus.request(self.address, "cm", expect="GS", timeout=timeout)
         return StatusCode(reply.as_status_code())
@@ -739,16 +1203,30 @@ class ZeroPositionMixin:
     """sz, gz: ND filter rotator (ELL22) only."""
 
     def set_zero_position(self) -> StatusCode:
-        """HOSTSET_ZEROPOSITION "sz". Makes the current encoder position the new logical zero."""
+        """HOSTSET_ZEROPOSITION "sz". Makes the current encoder position the new logical zero.
+
+        Returns:
+            The resulting status code.
+        """
         reply = self._request("sz", expect="GS", raise_on_error=False)
         return StatusCode(reply.as_status_code())
 
     def get_zero_position_offset_pulses(self) -> int:
-        """HOSTGET_ZEROPOSITION "gz" / DEVGET_ZEROPOSITION "ZO"."""
+        """HOSTGET_ZEROPOSITION "gz" / DEVGET_ZEROPOSITION "ZO".
+
+        Returns:
+            The offset between the logical zero and the absolute encoder
+            zero, in raw encoder pulses.
+        """
         reply = self._request("gz", expect="ZO")
         return protocol.decode_long(reply.data)
 
     def get_zero_position_offset(self) -> float:
+        """Offset between the logical zero and the absolute encoder zero, in units.
+
+        Returns:
+            The zero-position offset, in mm or degrees.
+        """
         return self._to_unit(self.get_zero_position_offset_pulses())
 
 
@@ -756,5 +1234,5 @@ class ResetFactoryMixin:
     """rd: ELL22 only. Restarts the device."""
 
     def reset_factory_default(self) -> None:
-        """HOSTREQ_RESETFACTORY_DEFAULT "rd"."""
+        """HOSTREQ_RESETFACTORY_DEFAULT "rd". Restores all parameters to factory defaults and restarts."""
         self.bus.send(self.address, "rd")

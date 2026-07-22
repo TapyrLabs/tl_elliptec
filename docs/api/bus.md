@@ -6,8 +6,9 @@ call through a priority queue (see {doc}`../guide/polling`), so replies are
 never interleaved and explicitly issued commands always jump ahead of
 background polling.
 
-```{automodule} tl_elliptec.bus
-:members:
-:undoc-members:
-:exclude-members: _RequestBroker
+```{eval-rst}
+.. automodule:: tl_elliptec.bus
+   :members:
+   :undoc-members:
+   :exclude-members: _RequestBroker
 ```

@@ -60,11 +60,21 @@ class RequestPriority:
 
 
 class Reply:
-    """A parsed incoming frame."""
+    """A parsed incoming frame: ``address`` (single hex digit the reply came
+    from), ``command`` (2-character reply mnemonic, e.g. ``"GS"`` or
+    ``"PO"``), ``data`` (hex-ASCII data payload, may be empty), and ``raw``
+    (the raw frame bytes as received, terminator stripped).
+    """
 
     __slots__ = ("address", "command", "data", "raw")
 
     def __init__(self, address: str, command: str, data: str, raw: bytes):
+        """Args:
+            address: Single hex-digit address the reply came from.
+            command: 2-character reply mnemonic.
+            data: Hex-ASCII data payload.
+            raw: The raw frame bytes as received.
+        """
         self.address = address
         self.command = command
         self.data = data
@@ -74,10 +84,20 @@ class Reply:
         return f"Reply({self.address}{self.command}{self.data!r})"
 
     def as_status_code(self) -> int:
-        """Interpret this reply's data as a GS/BS status byte."""
+        """Interpret this reply's data as a GS/BS status byte.
+
+        Returns:
+            The numeric status code (see :class:`~tl_elliptec.status.StatusCode`).
+        """
         return protocol.decode_char(self.data)
 
     def raise_for_status(self) -> None:
+        """Raise :class:`~tl_elliptec.exceptions.ElliptecStatusError` if this is a non-OK GS/BS reply.
+
+        Raises:
+            ElliptecStatusError: If ``command`` is ``"GS"``/``"BS"`` and the
+                status code isn't :attr:`~tl_elliptec.status.StatusCode.OK`.
+        """
         if self.command in _STATUS_COMMANDS:
             code = self.as_status_code()
             if code not in (StatusCode.OK,):
@@ -151,6 +171,16 @@ class ElliptecBus:
         timeout: float = 2.0,
         serial_kwargs: Optional[dict] = None,
     ):
+        """Args:
+            port: Serial port name/path, e.g. ``"COM5"`` or ``"/dev/ttyUSB0"``.
+            baudrate: Serial baud rate. The protocol is fixed at 9600 8-N-1
+                on real hardware; only change this for testing against a
+                non-standard transport.
+            timeout: Default per-request reply timeout, in seconds. Can be
+                overridden per call via ``request()``'s own ``timeout``.
+            serial_kwargs: Extra keyword arguments merged into (overriding)
+                the ones passed to :class:`serial.Serial`.
+        """
         self.port_name = port
         self.timeout = timeout
         kwargs = dict(
@@ -175,6 +205,7 @@ class ElliptecBus:
         self._devices: dict = {}
 
     def close(self) -> None:
+        """Stop the request broker's worker thread and close the serial port."""
         self._broker.stop()
         if self._serial.is_open:
             self._serial.close()
@@ -187,6 +218,7 @@ class ElliptecBus:
 
     @property
     def is_open(self) -> bool:
+        """``True`` if the underlying serial port is currently open."""
         return self._serial.is_open
 
     # -- framing (normally only called from the broker's worker thread;
@@ -273,11 +305,35 @@ class ElliptecBus:
     # -- public API: safe to call from any thread, arbitrated by the broker --
 
     def read_reply(self, timeout: Optional[float] = None, priority: int = RequestPriority.COMMAND) -> Reply:
-        """Read and parse a single incoming frame (blocking)."""
+        """Read and parse a single incoming frame (blocking).
+
+        Useful for passively listening for spontaneous BS/BO button-status
+        messages, which aren't solicited by a host command.
+
+        Args:
+            timeout: Maximum time to wait, in seconds. Defaults to the
+                bus's own ``timeout``.
+            priority: Scheduling priority against other pending requests
+                (see :class:`RequestPriority`).
+
+        Returns:
+            The next parsed frame.
+
+        Raises:
+            ElliptecTimeoutError: If no frame arrives within ``timeout``.
+        """
         return self._broker.submit(priority, lambda: self._read_reply_raw(timeout=timeout)).result()
 
     def send(self, address: str, command: str, data: str = "", priority: int = RequestPriority.COMMAND) -> None:
-        """Send a command with no expectation of a reply being awaited here."""
+        """Send a command with no expectation of a reply being awaited here.
+
+        Args:
+            address: Single hex-digit device address.
+            command: 2-character command mnemonic.
+            data: Optional hex-ASCII data payload.
+            priority: Scheduling priority against other pending requests
+                (see :class:`RequestPriority`).
+        """
         self._broker.submit(priority, lambda: self._write(address, command, data)).result()
 
     def send_urgent(self, address: str, command: str, data: str = "") -> None:
@@ -308,6 +364,11 @@ class ElliptecBus:
         address will see any response on its own next read. Call
         ``get_position()``/``get_status()`` afterward if you need to
         confirm the outcome.
+
+        Args:
+            address: Single hex-digit device address.
+            command: 2-character command mnemonic, e.g. ``"st"``.
+            data: Optional hex-ASCII data payload.
         """
         self._write(address, command, data)
 
@@ -344,6 +405,34 @@ class ElliptecBus:
         ``priority`` controls scheduling against other pending requests on
         this bus (see :class:`RequestPriority`); leave it at the default
         unless this call is opportunistic background polling.
+
+        Args:
+            address: Single hex-digit device address to send the command to.
+            command: 2-character command mnemonic, e.g. ``"in"``.
+            data: Optional hex-ASCII data payload.
+            expect: Reply mnemonic to wait for, e.g. ``"PO"``. If omitted,
+                the first non-busy reply is accepted regardless of mnemonic.
+            timeout: Overall deadline for this request, in seconds.
+                Defaults to the bus's own ``timeout``.
+            poll_timeout: Maximum time to wait for each individual interim
+                frame (e.g. a busy status) before re-checking the overall
+                deadline. Defaults to the remaining overall timeout.
+            raise_on_error: If ``True`` (default), a non-OK GS/BS status
+                reply raises :class:`~tl_elliptec.exceptions.ElliptecStatusError`.
+            priority: Scheduling priority against other pending requests
+                (see :class:`RequestPriority`).
+            reply_address: Address incoming replies must carry to be
+                accepted; defaults to ``address``.
+
+        Returns:
+            The reply that satisfied ``expect`` (or the first non-busy
+            reply, if ``expect`` was omitted).
+
+        Raises:
+            ElliptecTimeoutError: If no satisfying reply arrives within
+                ``timeout``.
+            ElliptecStatusError: If ``raise_on_error`` is ``True`` and a
+                non-OK GS/BS status reply is received.
         """
         return self._broker.submit(
             priority,
@@ -353,13 +442,32 @@ class ElliptecBus:
         ).result()
 
     def request_status(self, address: str, command: str, data: str = "", **kwargs) -> Reply:
-        """Convenience wrapper for commands whose only reply is GS/BS."""
+        """Convenience wrapper for commands whose only reply is GS/BS.
+
+        Args:
+            address: Single hex-digit device address.
+            command: 2-character command mnemonic.
+            data: Optional hex-ASCII data payload.
+            **kwargs: Forwarded to :meth:`request`.
+
+        Returns:
+            The GS/BS status reply.
+        """
         return self.request(address, command, data, **kwargs)
 
     # -- bus scanning ---------------------------------------------------
 
     def scan(self, addresses: str = protocol.ADDRESS_CHARS, timeout: float = 0.3) -> list[str]:
-        """Probe each address with an "in" (get info) request; return the ones that answer."""
+        """Probe each address with an "in" (get info) request; return the ones that answer.
+
+        Args:
+            addresses: Iterable of single-hex-digit addresses to probe.
+                Defaults to all 16 (``"0"``-``"F"``).
+            timeout: Per-address reply timeout, in seconds.
+
+        Returns:
+            The addresses that answered, in the order probed.
+        """
         found = []
         for addr in addresses:
             try:
@@ -385,7 +493,7 @@ class ElliptecBus:
         Returns a plain, JSON-safe dict: ``{address: {ell_type,
         serial_number, travel, pulses_per_unit}}``. ``pulses_per_unit`` is
         the already-corrected value (handles the rotary
-        pulses-per-revolution quirk internally -- see
+        pulses-per-revolution correction internally -- see
         ``ElliptecDevice.PULSES_FIELD_IS_PER_REVOLUTION``), so callers never
         need to reimplement that calibration themselves.
 
@@ -393,6 +501,16 @@ class ElliptecBus:
         rebound to a new dict), so an already-running ``stream_positions()``
         generator picks up newly discovered devices on its next tick without
         needing to be restarted.
+
+        Args:
+            addresses: Iterable of single-hex-digit addresses to probe.
+                Defaults to all 16 (``"0"``-``"F"``).
+            timeout: Per-address reply timeout, in seconds.
+
+        Returns:
+            A dict keyed by address, each value a dict with keys
+            ``ell_type`` (int), ``serial_number`` (str), ``travel`` (int),
+            and ``pulses_per_unit`` (float) -- one entry per device found.
         """
         from .factory import discover_devices  # deferred: factory imports devices, which imports this module
 
@@ -426,6 +544,17 @@ class ElliptecBus:
         Reads the registry fresh (via ``list(...)``) each outer-loop pass,
         so devices added by a concurrent ``refresh_devices()`` call show up
         automatically on the next tick -- no need to restart this generator.
+
+        Args:
+            interval: Delay between polling ticks, in seconds.
+            tolerance: Minimum change (in raw pulses) required to report a
+                device's position again; ``0`` reports on any change.
+
+        Yields:
+            ``{address: {"pulses": int, "units": float}}`` for whichever
+            devices changed by more than ``tolerance`` since the last tick.
+            Never yields an empty dict -- if nothing changed, the tick is
+            skipped entirely.
         """
         last: dict = {}
         while True:

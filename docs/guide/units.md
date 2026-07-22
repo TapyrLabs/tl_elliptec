@@ -18,7 +18,7 @@ stage.move_absolute_pulses(10240)       # same move, in raw pulses (if 1024 puls
 stage.pulses_per_unit                   # 1024.0
 ```
 
-## The rotary pulses-per-revolution quirk
+## The rotary pulses-per-revolution correction
 
 On rotary stages (ELL14/16/18/21/22), `get_info()`'s reported pulse count is
 empirically pulses-per-full-revolution (e.g. 143360 for the ELL14), not
@@ -28,7 +28,7 @@ device's reported travel (360°) to get the real pulses/degree used by
 don't need this correction; their reported field already is pulses/mm or
 pulses/position.
 
-## 0..1 range, for when you don't care about physical units
+## Range_rate unit
 
 `move_absolute`, `move_relative`, and `home` also have `_range` twins
 (`move_absolute_range`, `move_relative_range`, `home_range`), along with

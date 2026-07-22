@@ -1,6 +1,7 @@
 # exceptions
 
-```{automodule} tl_elliptec.exceptions
-:members:
-:undoc-members:
+```{eval-rst}
+.. automodule:: tl_elliptec.exceptions
+   :members:
+   :undoc-members:
 ```
