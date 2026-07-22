@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tl_elliptec"
+version = "0.1.0"
+description = "Python library for Thorlabs Elliptec (ELLx) resonant piezo motor modules"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+    { name = "Matteo Michiardi" },
+]
+keywords = ["thorlabs", "elliptec", "serial", "instrumentation", "motion-control"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
+dependencies = [
+    "pyserial>=3.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/TapyrLabs/tl_elliptec"
+Repository = "https://github.com/TapyrLabs/tl_elliptec"
+Issues = "https://github.com/TapyrLabs/tl_elliptec/issues"
+Documentation = "https://tl-elliptec.readthedocs.io"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+docs = ["sphinx>=7.0", "furo", "myst-parser"]
+
+[tool.setuptools.packages.find]
+include = ["tl_elliptec*"]
