@@ -33,7 +33,7 @@ pip install -e ".[test]"
 ## Quick start
 
 One device wired straight to its controller (no hub) — construct the model
-class directly from the serial port; it opens and owns the port itself:
+class directly from the serial port; it opens and owns the port itself (Make sure to use the correct COM port for your setup):
 
 ```python
 from tl_elliptec import ELL20
@@ -68,9 +68,8 @@ with ElliptecBus("COM5") as bus:
 Every ELLx module ships from the factory at address `"0"`. Wire two or more
 onto the same bus **before** giving them unique addresses and they all
 answer to `"0"` at once — their replies collide on the wire, so neither
-`scan()` nor `discover_devices()` finds anything, even though electrically
-everything is fine. This has to be fixed once, per device, before they
-share the bus. Either let the library walk you through it:
+`scan()` nor `discover_devices()` finds anything. This has to be fixed once, per device, before they
+share the bus. Either let the library walk you through it, always connect one device at a time:
 
 ```python
 from tl_elliptec import ElliptecBus, setup_devices
@@ -80,7 +79,7 @@ with ElliptecBus("COM5") as bus:
     assigned = setup_devices(bus, count=2)   # e.g. ["1", "2"]
 ```
 
-...or do it by hand, one device connected alone at a time:
+...or do it by hand, one device connected at a time:
 
 ```python
 from tl_elliptec import ElliptecBus, ELL14
@@ -96,10 +95,7 @@ every session.
 
 ## Broker-handled communication and live position streaming
 
-`ElliptecBus` owns the serial port through a single background worker
-thread and a priority queue — every call, from any thread, for any device,
-is serialized safely through it, so replies are never interleaved or
-misattributed. Explicitly issued commands (moves, reads, ...) always jump
+Normally, when many devices are connected to a single serial port, and with incessent polling, the communicaiton might go into conflict and brake. tl_elliptec implements a serial communication broker in the `ElliptecBus` class, the broker implements a read/write priority queue for safe command serialization. Explicitly issued commands (moves, reads, ...) always jump
 ahead of background polling, so polling a device's position never delays a
 move you're waiting on:
 
@@ -110,12 +106,10 @@ for position in stage.poll_position():   # a generator -- only work while it's i
 
 This scales to several devices on one bus without extra locking — run one
 `poll_position()` per device on its own thread, and issue moves from
-another thread (or the main one) whenever you like; the broker keeps
-everything safe and prioritized. See the docs for the full explanation and
-a multi-device example.
+another thread (or the main one) whenever you like. 
 
-That's the tip of it — units vs. raw pulses, the `stop()` caveat, and the
-full command reference are all in the docs:
+
+Full command reference are all in the docs:
 **[tl-elliptec.readthedocs.io](https://tl-elliptec.readthedocs.io)**
 
 ## Running the tests
@@ -131,3 +125,9 @@ values against the manual's own worked examples.
 ## License
 
 [MIT](LICENSE) © Matteo Michiardi
+
+---
+
+If this library saved you some time, consider buying me a coffee ☕
+
+[![Buy Me A Coffee](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://www.buymeacoffee.com/tapyr)
