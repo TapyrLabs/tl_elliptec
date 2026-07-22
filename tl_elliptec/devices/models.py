@@ -111,7 +111,7 @@ class ELL22(
     supports_motor_tuning = False
     supports_button_messages = False
     DEFAULT_PULSES_PER_UNIT = 182.0  # pulses/degree
-    PULSES_FIELD_IS_PER_REVOLUTION = True  # confirmed empirically; get_info() reports pulses/rev
+    PULSES_FIELD_IS_PER_REVOLUTION = True  # get_info() reports 65536 pulses/rev, not 182 pulses/deg
 
 
 #: Maps the decimal model number (14 for an ELL14, etc.) reported by "in"/"IN"

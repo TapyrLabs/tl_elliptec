@@ -352,13 +352,12 @@ class ElliptecBus:
         ``_write``'s own lock only guards against two writes landing on the
         wire at once, not against a concurrent read.
 
-        Note: confirmed on real hardware that HOST_MOTIONSTOP "st" does
-        *not* interrupt a bounded move_absolute/move_relative/home once
-        issued -- only continuous jog motion (jog step size 0) or an
-        optimize/clean cycle. Sending "st" while a bounded move is in
-        flight is a no-op; that move's job keeps running until the
-        physical move completes on its own, exactly as if "st" was never
-        sent (see ``MotionMixin.stop``).
+        Note: HOST_MOTIONSTOP "st" only interrupts continuous jog motion
+        (jog step size 0) or an optimize/clean cycle -- it does not
+        interrupt a bounded move_absolute/move_relative/home once issued.
+        Sending "st" while a bounded move is in flight is a no-op; that
+        move's job keeps running until the physical move completes on its
+        own, exactly as if "st" was never sent (see ``MotionMixin.stop``).
 
         No reply is read here -- whatever job is already in flight for this
         address will see any response on its own next read. Call

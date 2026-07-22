@@ -1098,12 +1098,12 @@ class MotionMixin:
     def stop(self) -> None:
         """HOST_MOTIONSTOP "st". Stops continuous motion (ELL14) or an optimize/clean cycle.
 
-        Confirmed on real hardware: this does *not* interrupt a bounded
-        ``move_absolute``/``move_relative``/``home`` once issued -- the
-        move keeps running until the physical motion completes, exactly as
-        if ``stop()`` was never called. It only affects continuous jog
-        motion (jog step size 0, started via ``forward``/``backward``) or
-        an in-progress optimize/clean cycle.
+        This does *not* interrupt a bounded ``move_absolute``/
+        ``move_relative``/``home`` once issued -- the move keeps running
+        until the physical motion completes, exactly as if ``stop()`` was
+        never called. It only affects continuous jog motion (jog step size
+        0, started via ``forward``/``backward``) or an in-progress
+        optimize/clean cycle.
 
         Sent as an urgent, queue-bypassing write (see
         ``ElliptecBus.send_urgent``) rather than a normal request, since
