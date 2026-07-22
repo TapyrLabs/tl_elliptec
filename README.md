@@ -8,6 +8,11 @@ Python library for [Thorlabs Elliptec](https://www.thorlabs.com/newgrouppage9.cf
 
 **Full documentation: [tl-elliptec.readthedocs.io](https://tl-elliptec.readthedocs.io)**
 
+> This is an unofficial, community-maintained library. It is not affiliated
+> with, endorsed by, or sponsored by Thorlabs, Inc. "Thorlabs" and
+> "Elliptec" are trademarks of Thorlabs, Inc., used here only to identify
+> the hardware this library talks to.
+
 ## Supported devices
 
 ELL6, ELL6B, ELL9, ELL12, ELL14, ELL15, ELL16, ELL17, ELL18, ELL20, ELL21, ELL22.

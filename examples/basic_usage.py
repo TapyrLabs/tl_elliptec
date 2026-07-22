@@ -2,7 +2,7 @@
 
 from tl_elliptec import ElliptecBus, discover_devices
 
-PORT = "COM12"  # e.g. "COM5" on Windows, "/dev/ttyUSB0" on Linux
+PORT = "COM5"  # e.g. "COM5" on Windows, "/dev/ttyUSB0" on Linux
 
 with ElliptecBus(PORT) as bus:
     devices = discover_devices(bus)

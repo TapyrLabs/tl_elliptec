@@ -14,7 +14,7 @@ import time
 
 from tl_elliptec import ElliptecBus, discover_devices
 
-PORT = "COM12"
+PORT = "COM5"
 
 
 def watch(name, device, stop_event):
