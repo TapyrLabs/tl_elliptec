@@ -12,6 +12,7 @@ docs/_build/
 # Editors
 .vscode/
 .idea/
+.claude/
 
 # Not part of this library's public release (Tapyr-specific integration)
 /deploy/
