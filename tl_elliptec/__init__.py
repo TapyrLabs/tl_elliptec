@@ -50,7 +50,7 @@ from .exceptions import (
 from .factory import create_device, discover_devices, setup_devices
 from .status import StatusCode
 
-__version__ = "0.1.0"
+__version__ = "1.0.1"
 
 __all__ = [
     "ElliptecBus",
